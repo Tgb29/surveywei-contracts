@@ -1,6 +1,6 @@
 pragma solidity ^0.8.0;
 
-//import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 
 interface IAttestationStation {
     struct AttestationData {
@@ -16,13 +16,13 @@ interface IAttestationStation {
 
 contract SurveyWei {
 
-    //using SafeMath for uint256;
+    using SafeMath for uint256;
 
     address attestStationAddress = 0xEE36eaaD94d1Cc1d0eccaDb55C38bFfB6Be06C77;
 
     uint256 minAttestations = 3;
     uint256 minRatio = 10;
-    uint256 daysInSeconds = 7 * 24 * 60 * 60;
+    uint256 daysInSeconds = 7 * 24 * 60 * 60; //7 days
 
     enum SurveyStatus { Open, Closed }
     enum RespondentStatus { Started, Completed, Unfinished, DQ}
@@ -59,13 +59,14 @@ contract SurveyWei {
     event SurveyClosed(address indexed creator, string id);
     event SurveyStarted(address indexed respondent, string id);
     event SurveyCompleted(address indexed respondent, string id);
-    event TransferSuccessful(address indexed _from, address indexed _to, uint256 _value);
+    event TransferSuccessful(address indexed _to, uint256 _value);
 
     function createSurvey(string memory _id, uint256 _bounty, uint256 _respondents, uint256 _timeLength) public {
         require(bytes(_id).length > 0, "id needs to be > 0");
         require(bytes(surveys[_id].id).length == 0, "survey already exists");
+        require(_respondents > 0, "Need at least 1 respondent");
 
-        Survey memory newSurvey = Survey(_id, msg.sender, _bounty, _bounty, _respondents, SurveyStatus.Open, block.timestamp, _timeLength, 0, 0, new address[](0));
+        Survey memory newSurvey = Survey(_id, msg.sender, _bounty, _bounty, _respondents, SurveyStatus.Open, block.timestamp, _timeLength, 0, 0, 0, new address[](0));
         surveys[_id]=newSurvey;
 
         emit SurveyCreated(msg.sender, _id);
@@ -74,21 +75,21 @@ contract SurveyWei {
     function beginSurvey(string memory _id) public {
         require(surveys[_id].status == SurveyStatus.Open, "Survey is closed.");
         require(respondents[msg.sender][_id].respondentStartTime == 0, "Respondent already started");
+        require(surveys[_id].respondentsCompleted < surveys[_id].respondents, "No more respondents allowed.");
         
-        if(surveys[_id].respondents>0) {
-            require(surveys[_id].respondentsCompleted < surveys[_id].respondents, "No more respondents allowed.");
-            
-            if((surveys[_id].respondentsCompleted + surveys[_id].respondentsStarted)==surveys[_id].respondents) {
+        if((surveys[_id].respondentsCompleted + surveys[_id].respondentsStarted)==surveys[_id].respondents) {
 
-                for (uint256 i = 0; i < surveys[_id].active.length; i++) {
+            for (uint256 i = 0; i < surveys[_id].active.length; i++) {
 
-                    if ((respondents[surveys[_id].active[i]][_id].respondentStartTime + surveys[_id].timeLength) > block.timestamp) {
-                        respondents[surveys[_id].active[i]][_id].status=RespondentStatus.Unfinished;
-                        surveys[_id].active[i] = surveys[_id].active[surveys[_id].active.length - 1];
-                        surveys[_id].active.pop();
-                    }
+                if ((respondents[surveys[_id].active[i]][_id].respondentStartTime + surveys[_id].timeLength) > block.timestamp) {
+                    respondents[surveys[_id].active[i]][_id].status=RespondentStatus.Unfinished;
+                    surveys[_id].active[i] = surveys[_id].active[surveys[_id].active.length - 1];
+                    surveys[_id].active.pop();
                 }
             }
+
+            require((surveys[_id].respondentsCompleted + surveys[_id].respondentsStarted)<surveys[_id].respondents, "Survey full");
+
         }
 
         respondents[msg.sender][_id].respondentStartTime = block.timestamp;
@@ -96,6 +97,8 @@ contract SurveyWei {
 
         surveys[_id].respondentsStarted++;
         surveys[_id].active.push(msg.sender);
+
+        emit SurveyStarted(msg.sender, _id);
     }
 
     function completeSurvey(string memory _id, string memory _answers) public {
@@ -117,33 +120,31 @@ contract SurveyWei {
             }
         }
 
-        if (surveys[_id].respondents>0) {
-            if (surveys[_id].respondentsCompleted == surveys[_id].respondents) {
-                surveys[_id].status = SurveyStatus.Closed;
-            }
+        if (surveys[_id].respondentsCompleted == surveys[_id].respondents) {
+            surveys[_id].status = SurveyStatus.Closed;
         }
-
+        
         //if good credit, pay and auto-attest
         bool creditCheck = surveyCreditCheck(msg.sender);
         if (creditCheck) {
             positiveAttestation(msg.sender);
             respondents[msg.sender][_id].positive = true;
-            respondents[msg.sender][_id].claimed = true;
             if (surveys[_id].totalBounty>0) {
                 awardEth(payable(msg.sender), _id);
             }
+            respondents[msg.sender][_id].claimed = true;
         }
+
+        emit SurveyCompleted(msg.sender, _id);
 
         
     }
 
     function closeSurvey(string memory _id) public {
-        require(surveys[_id].status == SurveyStatus.Open, "Survey is closed.");
+        require(surveys[_id].status == SurveyStatus.Open, "Survey is already closed.");
         require(msg.sender == surveys[_id].creator, "Only survey creator can close");
-        //close survey. if users have started, let them completed. don't let anyone else start.
 
         surveys[_id].status = SurveyStatus.Closed;
-
     }
 
     function positiveAttestation (address _respondent) internal {
@@ -178,7 +179,7 @@ contract SurveyWei {
         for (uint256 i = 0; i < _respondents.length; i++) {
 
             if(!respondents[_respondents[i]][_id].negative) {
-                bytes memory attestation = attestStation.getAttestation(msg.sender, i, bytes32("surveys.dq"));
+                bytes memory attestation = attestStation.getAttestation(msg.sender, _respondents[i], bytes32("surveys.dq"));
 
                 uint256 newValue;
                 
@@ -215,7 +216,7 @@ contract SurveyWei {
         surveys[_id].respondentsClaimed++;
         
         // Emit the TransferSuccessful event
-        emit TransferSuccessful(address(this), _to, _amount);
+        emit TransferSuccessful(_to, _amount);
     }
 
     function surveyCreditCheck(address _respondent) public returns (bool) {
@@ -265,14 +266,25 @@ contract SurveyWei {
         require(msg.sender == surveys[_id].creator, "Only survey creator can close");
         require(surveys[_id].remainingBounty>0, "No remaining balance");
 
+        if(surveys[_id].respondentsStarted>0) {
+
+            for (uint256 i = 0; i < surveys[_id].active.length; i++) {
+
+                if ((respondents[surveys[_id].active[i]][_id].respondentStartTime + surveys[_id].timeLength) > block.timestamp) {
+                    respondents[surveys[_id].active[i]][_id].status=RespondentStatus.Unfinished;
+                    surveys[_id].active[i] = surveys[_id].active[surveys[_id].active.length - 1];
+                    surveys[_id].active.pop();
+                    surveys[_id].respondentsStarted--;
+                }
+            }
+
+            require(surveys[_id].respondentsStarted ==0, "Survey still has active respondents");
+
+        }
+
         (bool success, ) = payable(msg.sender).call{value: surveys[_id].remainingBounty}("");
         require(success, "Transfer failed");
 
         surveys[_id].remainingBounty = 0;
-
-
     }
-
-    
-
 }
