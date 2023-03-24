@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
@@ -60,13 +62,15 @@ contract SurveyWei {
     event SurveyStarted(address indexed respondent, string id);
     event SurveyCompleted(address indexed respondent, string id);
     event TransferSuccessful(address indexed _to, uint256 _value);
+    event AttestationSubmitted(bytes32 _attestation, address indexed _subject);
 
-    function createSurvey(string memory _id, uint256 _bounty, uint256 _respondents, uint256 _timeLength) public {
+    function createSurvey(string memory _id, uint256 _bounty, uint256 _respondents, uint256 _timeLength) payable public {
         require(bytes(_id).length > 0, "id needs to be > 0");
         require(bytes(surveys[_id].id).length == 0, "survey already exists");
         require(_respondents > 0, "Need at least 1 respondent");
+        require(msg.value >= _bounty, "Not enough funds sent for the bounty");
 
-        Survey memory newSurvey = Survey(_id, msg.sender, _bounty, _bounty, _respondents, SurveyStatus.Open, block.timestamp, _timeLength, 0, 0, 0, new address[](0));
+        Survey memory newSurvey = Survey(_id, msg.sender, _bounty, _bounty, _respondents, SurveyStatus.Open, block.timestamp, _timeLength*60, 0, 0, 0, new address[](0));
         surveys[_id]=newSurvey;
 
         emit SurveyCreated(msg.sender, _id);
@@ -169,6 +173,8 @@ contract SurveyWei {
         IAttestationStation.AttestationData[] memory myAttestationArray = new IAttestationStation.AttestationData[](1);
         myAttestationArray[0] = myAttestation;
         attestStation.attest(myAttestationArray);
+
+        emit AttestationSubmitted(bytes32("surveys.completed"), _respondent);
     }
 
     function negativeAttestation (string memory _id, address[] memory _respondents) public {
@@ -200,8 +206,11 @@ contract SurveyWei {
                 myAttestationArray[0] = myAttestation;
                 attestStation.attest(myAttestationArray);
                 respondents[msg.sender][_id].negative = true;
+                emit AttestationSubmitted(bytes32("surveys.dq"), _respondents[i]);
             }
         }
+
+        
     }
 
     function awardEth(address payable _to, string memory _id) internal {
@@ -219,7 +228,7 @@ contract SurveyWei {
         emit TransferSuccessful(_to, _amount);
     }
 
-    function surveyCreditCheck(address _respondent) public returns (bool) {
+    function surveyCreditCheck(address _respondent) public view returns (bool) {
         IAttestationStation attestStation = IAttestationStation(attestStationAddress);
 
         bool pass;
