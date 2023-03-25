@@ -254,10 +254,19 @@ contract SurveyWei {
 
     }
 
-    function getAttestation(address _respondent) public view returns (bytes memory) {
+    function getPositiveAttestation(address _respondent) public view returns (bytes memory) {
         IAttestationStation attestStation = IAttestationStation(attestStationAddress);
 
-        bytes memory positiveAttestationScore = attestStation.attestations(msg.sender, _respondent, bytes32("surveys.completed"));
+        bytes memory positiveAttestationScore = attestStation.attestations(address(this), _respondent, bytes32("surveys.completed"));
+
+        return positiveAttestationScore;
+
+    }
+
+    function getNegativeAttestation(address _respondent) public view returns (bytes memory) {
+        IAttestationStation attestStation = IAttestationStation(attestStationAddress);
+
+        bytes memory positiveAttestationScore = attestStation.attestations(address(this), _respondent, bytes32("surveys.dq"));
 
         return positiveAttestationScore;
 
