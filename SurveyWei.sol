@@ -13,7 +13,7 @@ interface IAttestationStation {
 
     function attest(AttestationData[] memory _attestations) external;
 
-    function getAttestation(address _attester, address _subject, bytes32 _key) external view returns (bytes memory);
+    function attestations(address _attester, address _subject, bytes32 _key) external view returns (bytes memory);
 }
 
 contract SurveyWei {
@@ -23,7 +23,7 @@ contract SurveyWei {
     address attestStationAddress = 0xEE36eaaD94d1Cc1d0eccaDb55C38bFfB6Be06C77;
 
     uint256 minAttestations = 3;
-    uint256 minRatio = 10;
+    uint256 minRatio = 5;
     uint256 daysInSeconds = 7 * 24 * 60 * 60; //7 days
 
     enum SurveyStatus { Open, Closed }
@@ -128,10 +128,10 @@ contract SurveyWei {
             surveys[_id].status = SurveyStatus.Closed;
         }
         
-        //if good credit, pay and auto-attest
+        positiveAttestation(msg.sender);
+        //if good credit, pay
         bool creditCheck = surveyCreditCheck(msg.sender);
         if (creditCheck) {
-            positiveAttestation(msg.sender);
             respondents[msg.sender][_id].positive = true;
             if (surveys[_id].totalBounty>0) {
                 awardEth(payable(msg.sender), _id);
@@ -140,7 +140,6 @@ contract SurveyWei {
         }
 
         emit SurveyCompleted(msg.sender, _id);
-
         
     }
 
@@ -156,7 +155,7 @@ contract SurveyWei {
 
         uint256 newValue;
 
-        bytes memory attestation = attestStation.getAttestation(msg.sender, _respondent, bytes32("surveys.completed"));
+        bytes memory attestation = attestStation.attestations(msg.sender, _respondent, bytes32("surveys.completed"));
         if (attestation.length == 0) {
             newValue = 1;
         } else {
@@ -185,7 +184,7 @@ contract SurveyWei {
         for (uint256 i = 0; i < _respondents.length; i++) {
 
             if(!respondents[_respondents[i]][_id].negative) {
-                bytes memory attestation = attestStation.getAttestation(msg.sender, _respondents[i], bytes32("surveys.dq"));
+                bytes memory attestation = attestStation.attestations(msg.sender, _respondents[i], bytes32("surveys.dq"));
 
                 uint256 newValue;
                 
@@ -209,12 +208,9 @@ contract SurveyWei {
                 emit AttestationSubmitted(bytes32("surveys.dq"), _respondents[i]);
             }
         }
-
-        
     }
 
     function awardEth(address payable _to, string memory _id) internal {
-        
         uint256 _amount = surveys[_id].totalBounty/surveys[_id].respondents;
 
         // Safely transfer the specified amount of ETH to the recipient
@@ -236,12 +232,14 @@ contract SurveyWei {
         uint256 positiveScore;
         uint256 negativeScore;
 
-        bytes memory positiveAttestationScore = attestStation.getAttestation(msg.sender, _respondent, bytes32("surveys.completed"));
+        bytes memory positiveAttestationScore = attestStation.attestations(msg.sender, _respondent, bytes32("surveys.completed"));
+        
         if (positiveAttestationScore.length > 0) {
              positiveScore = abi.decode(positiveAttestationScore, (uint256));
         }
 
-        bytes memory negativeAttestationScore = attestStation.getAttestation(msg.sender, _respondent, bytes32("surveys.dq"));
+        bytes memory negativeAttestationScore = attestStation.attestations(msg.sender, _respondent, bytes32("surveys.dq"));
+
         if (negativeAttestationScore.length > 0) {
              negativeScore = abi.decode(negativeAttestationScore, (uint256));
         }
@@ -251,10 +249,20 @@ contract SurveyWei {
                 pass = true;
             }
         }
-
+        
         return pass;
 
     }
+
+    function getAttestation(address _respondent) public view returns (bytes memory) {
+        IAttestationStation attestStation = IAttestationStation(attestStationAddress);
+
+        bytes memory positiveAttestationScore = attestStation.attestations(msg.sender, _respondent, bytes32("surveys.completed"));
+
+        return positiveAttestationScore;
+
+    }
+
 
     function claimBounty(string memory _id) public {
         require(respondents[msg.sender][_id].status==RespondentStatus.Completed, "Respondent didn't complete survey");
@@ -267,8 +275,9 @@ contract SurveyWei {
         respondents[msg.sender][_id].positive = true;
         respondents[msg.sender][_id].claimed = true;
 
-
     }
+
+    
 
     function withdrawBounty(string memory _id) public {
         require(surveys[_id].status == SurveyStatus.Closed, "Survey must be closed.");
