@@ -260,6 +260,7 @@ contract SurveyWei {
         bytes memory positiveAttestationScore = attestStation.attestations(address(this), _respondent, bytes32("surveys.completed"));
 
         return positiveAttestationScore;
+        //add logic to decode and get int
 
     }
 
@@ -269,6 +270,7 @@ contract SurveyWei {
         bytes memory positiveAttestationScore = attestStation.attestations(address(this), _respondent, bytes32("surveys.dq"));
 
         return positiveAttestationScore;
+        //add logic to decode and get int
 
     }
 
@@ -285,8 +287,6 @@ contract SurveyWei {
         respondents[msg.sender][_id].claimed = true;
 
     }
-
-    
 
     function withdrawBounty(string memory _id) public {
         require(surveys[_id].status == SurveyStatus.Closed, "Survey must be closed.");

@@ -74,5 +74,10 @@ for event_name, event_signature in event_signatures.items():
         else:
             print(f"ABI entry for {event_name} not found")
 
-print(all_events)
+#print(all_events)
+for i in all_events:
+    if i["event"] == "SurveyStarted":
+        print(i["args"]["id"])
+        print(i["args"]["respondent"])
+        print(i)
 
